@@ -21,6 +21,8 @@ class SSG {
       },
       done: () => {
         this.jetty.moveTo([this.ROW.success, 3]).rgb(150).text('Successfully generated static site!');
+        this.jetty.moveTo([this.ROW.success+2, 3]).rgb(150).text(`File counts by type:`);
+        this.jetty.moveTo([this.ROW.success+3, 3]).rgb(150).text(JSON.stringify(this.typeCounts));
         // this.performance.mark('C');
         // this.performance.measure('A to B', 'A', 'B');
         // const measure = this.performance.getEntriesByName('A to B')[0];
@@ -38,6 +40,7 @@ class SSG {
     // this.performance = performance;
     this.fileCount = 0;
     this.args = config.args;
+    this.typeCounts = {};
   }
 
   init() {
@@ -71,12 +74,16 @@ class SSG {
     let filePath = `./${this.STATIC_DIR}${decodeURIComponent(doc.res.req.path)}`;
 
 
-    if (filePath.match(/\?.+$/)) { // If query string present remove from filename
+    if (filePath.match(/\?.+$/) && doc.res.headers['content-type'].match('text/html')) { // If query string present remove from filename
       filePath = filePath.replace(/\?(.+)=(.+)$/, '--$1--$2');
+    }else {
+      if(filePath.match(/\?.+$/)){
+        filePath = filePath.replace(/\?.+$/,'');
+      }
     }
 
     // in no fileextension
-    if (!filePath.match(/.\.(html|css|js|svg)(\?.+)?$/)) {
+    if (!filePath.match(/.\.(html)(\?.+)?$/) && doc.res.headers['content-type'].match('text/html')) {
       filePath += "/index.html"
     }
     // squeeze double slashes
@@ -117,6 +124,12 @@ class SSG {
     let styles = doc.$('style').toArray()
       .map(style => doc.$(style).text())
       .filter(style => style.match('@import'));
+    let linkStyles = doc.$('link').toArray()
+      .forEach(style => {
+        const href = doc.$(style).attr('href');
+        const url = doc.resolve(href);
+        this.spider.queue(url, (doc) => this.handleRequest(doc));
+      });
 
     styles.forEach((style) => {
       var regEx = /url\("(.*)"\)/g;
@@ -138,8 +151,10 @@ class SSG {
       if (href) {
         href = href.split('#')[0];
         const url = doc.resolve(href);
-        // crawl more
-        this.spider.queue(url, (doc) => this.handleRequest(doc));
+        // crawl more if the url has http protocol
+        if(url.match(/^https?:\/\//)){
+          this.spider.queue(url, (doc) => this.handleRequest(doc));
+        }
       }
     });
 
@@ -168,9 +183,14 @@ class SSG {
     SSG.ensureDirectoryExistence(filePath);
     // Write the file
     this.writeFile(filePath, doc);
-    (doc.res.headers['content-type'].match('text/html'));
-    this.scrapeContent(doc);
-
+    const contentType = doc.res.headers['content-type'];
+    const contentTypeShortMatch = contentType.match(/(.+);/);
+    const contentTypeShort = contentTypeShortMatch ? contentTypeShortMatch[1]: contentType;
+    this.typeCounts[contentTypeShort] = this.typeCounts.hasOwnProperty(contentTypeShort) ? this.typeCounts[contentTypeShort]+1 : 1;
+    // Scrape if the document is an HTML
+    if (contentType.match('text/html')){
+      this.scrapeContent(doc);
+    }
   }
 
   static ensureDirectoryExistence(filePath) {
