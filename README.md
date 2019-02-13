@@ -1,4 +1,4 @@
-# INVIQA static-site generator (SSI)
+# INVIQA static-site generator (SSG)
 
 Light weight script to crawl a website to download the static content.
 
