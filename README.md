@@ -29,19 +29,19 @@ Light weight script to crawl a website to download the static content.
 #### host
 
 The hostname
-`node index --host=example.com`
+```node index --host=example.com```
 
 #### Destination
 
 The folder name under /static where the downloaded files are saved
-`node index --dest=NewWebsite`
+```node index --dest=NewWebsite```
 
 #### Concurrencies
 
 Request parallelly
-`node index --cc=10`
+```node index --cc=10```
 
 #### Delay
 
 Waits for milliseconds before queuing new urls
-`node index --delay=200`
+```node index --delay=200```
