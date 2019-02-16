@@ -8,9 +8,13 @@ const fs = require('fs');
 const path = require('path');
 const rimraf = require('rimraf');
 const Spider = require('node-spider');
-// const {performance} = require('perf_hooks');
+const {performance, PerformanceObserver} = require('perf_hooks');
 const Jetty = require("jetty");
 
+
+/**
+ * SSG class
+ */
 class SSG {
   constructor(spiderConfig, config) {
     this.spiderConfig = spiderConfig;
@@ -21,31 +25,33 @@ class SSG {
       },
       done: () => {
         this.jetty.moveTo([this.ROW.success, 3]).rgb(150).text('Successfully generated static site!');
-        this.jetty.moveTo([this.ROW.success+2, 3]).rgb(150).text(`File counts by type:`);
-        this.jetty.moveTo([this.ROW.success+3, 3]).rgb(150).text(JSON.stringify(this.typeCounts));
-        // this.performance.mark('C');
-        // this.performance.measure('A to B', 'A', 'B');
-        // const measure = this.performance.getEntriesByName('A to B')[0];
-        //
-        // this.jetty.moveTo([this.ROW.perf, 3]).rgb(11).text(`Time to delete static: ${(measure.duration / 1000).toFixed(3)} sec`);
-        // this.performance.measure('A to C', 'A', 'C');
-        // const measure1 = this.performance.getEntriesByName('A to C')[0];
-        // this.jetty.moveTo([this.ROW.perf1, 3]).rgb(11).text(`Time to all queries: ${(measure1.duration / 1000).toFixed(2)} sec`);
+        this.jetty.moveTo([this.ROW.success + 4, 3]).rgb(6).text(`File counts by type:`);
+        let typeCountStr =Object.keys(this.typeCounts).sort((a, b) => this.typeCounts[a] - this.typeCounts[b]).map(type => type + '\t -> \t' + this.typeCounts[type]).join('\n\t');
+        this.jetty.moveTo([this.ROW.success + 5, 3]).rgb(6).text('----------------------------------\n\t'+ typeCountStr);
+
+        performance.mark('B');
+        performance.measure('A to B', 'A', 'B');
       },
     });
-    this.STATIC_DIR = 'static/'+config.STATIC_DIR;
+    this.STATIC_DIR = 'static/' + config.STATIC_DIR;
     this.TARGET_HOST = config.TARGET_HOST;
     this.ROW = config.ROW;
     this.jetty = new Jetty(process.stdout);
-    // this.performance = performance;
     this.fileCount = 0;
     this.args = config.args;
     this.typeCounts = {};
+
+    this.obs = new PerformanceObserver((items) => {
+      this.jetty.moveTo([this.ROW.success + 2, 3])
+        .rgb(150)
+        .text(`Time to all queries: ${(items.getEntries()[0].duration / 1000).toFixed(2)} sec`).moveTo([this.ROW.success + 20, 0]);
+      performance.clearMarks();
+    });
+    this.obs.observe({ entryTypes: ['measure'] });
   }
 
   init() {
-
-    // this.performance.mark('A'); // Mark A for perf check
+    performance.mark('A'); // Mark A for perf check
     this.jetty.clear();
     this.jetty.moveTo([this.ROW.intro, 0])
       .text('=========================================================\n' +
@@ -59,7 +65,7 @@ class SSG {
     // Clean up static folder before starting the crawler
     rimraf(`./${this.STATIC_DIR}`, () => {
       this.jetty.moveTo([this.ROW.folder, 5]).text('🗑  Static folder deleted!');
-      // this.performance.mark('B');
+      // performance.mark('B');
 
 
       // start crawling
@@ -69,6 +75,13 @@ class SSG {
     });
   }
 
+  /**
+   * Processes file path
+   * - adds index.html if needed
+   * - modifies file name to accomodate query strings
+   * @param doc
+   * @returns {string}
+   */
   processFilePath(doc) {
     // Place everything within a folder this.STATIC_DIR
     let filePath = `./${this.STATIC_DIR}${decodeURIComponent(doc.res.req.path)}`;
@@ -76,9 +89,9 @@ class SSG {
 
     if (filePath.match(/\?.+$/) && doc.res.headers['content-type'].match('text/html')) { // If query string present remove from filename
       filePath = filePath.replace(/\?(.+)=(.+)$/, '--$1--$2');
-    }else {
-      if(filePath.match(/\?.+$/)){
-        filePath = filePath.replace(/\?.+$/,'');
+    } else {
+      if (filePath.match(/\?.+$/)) {
+        filePath = filePath.replace(/\?.+$/, '');
       }
     }
 
@@ -90,6 +103,11 @@ class SSG {
     return filePath.replace(/\/\//, "/");
   }
 
+  /**
+   * Write file to static folder
+   * @param filePath
+   * @param doc
+   */
   writeFile(filePath, doc) {
     fs.writeFile(filePath, doc.res.body, (err) => {
       if (err) {
@@ -103,73 +121,52 @@ class SSG {
       this.jetty.moveTo([this.ROW.fileCount, 5])
         .erase(40).rgb(9, false)
         .moveTo([this.ROW.fileCount, 5])
-        .text(`🗂  Total file count: ${this.fileCount++}`).moveTo([15, 0]);
+        .text(`🗂  Total file count: ${this.fileCount++}`).moveTo([this.ROW.success + 20, 0]);
     });
   }
 
+  /**/
   scrapeContent(doc) {
-    // scrape JS files
-    doc.$('script').toArray().forEach((script) => {
-      let uri = doc.$(script).attr('src');
-
-      if (uri) {
-        let url = doc.resolve(uri.replace(/(\?.+)$/, ''));
-        if (url.match(this.TARGET_HOST)) {
-          this.spider.queue(url, (doc) => this.handleRequest(doc));
-        }
-      }
-    });
-
     // scrape CSS files from @imports
-    let styles = doc.$('style').toArray()
+    doc.$('style').toArray()
       .map(style => doc.$(style).text())
-      .filter(style => style.match('@import'));
-    let linkStyles = doc.$('link').toArray()
-      .forEach(style => {
-        const href = doc.$(style).attr('href');
-        const url = doc.resolve(href);
-        this.spider.queue(url, (doc) => this.handleRequest(doc));
-      });
-
-    styles.forEach((style) => {
-      var regEx = /url\("(.*)"\)/g;
+      .filter(style => style.match('@import'))
+      .forEach((style) => {
+      const regEx = /url\("(.*)"\)/g;
       let matches;
       while (matches = regEx.exec(style)) {
-        // console.log('xxx', matches[1]);
-        const url = doc.resolve(matches[1].replace(/(\?.+)$/, ''));
-        // crawl more
-        this.spider.queue(url, (doc) => this.handleRequest(doc));
+        this.queue(matches[1].replace(/(\?.+)$/, ''), doc);
       }
     });
 
-    // Scrape linked html files
-    let links = doc.$('a').toArray();
-    links = links.sort(() => Math.random() - 0.5);
-    links.forEach((elem) => {
-      // do stuff with element
-      let href = doc.$(elem).attr('href');
-      if (href) {
-        href = href.split('#')[0];
-        const url = doc.resolve(href);
-        // crawl more if the url has http protocol
-        if(url.match(/^https?:\/\//)){
-          this.spider.queue(url, (doc) => this.handleRequest(doc));
+    // Scrape linked html files and css files
+    doc.$('a, link').toArray()
+      .sort(() => Math.random() - 0.5)
+      .forEach((elem) => {
+        // do stuff with element
+        let href = doc.$(elem).attr('href');
+        if (href) {
+          this.queue(href.split('#')[0], doc);
         }
-      }
-    });
+      });
 
-    // Scrape linked image files
-    let images = doc.$('img').toArray();
-    images = images.sort(() => Math.random() - 0.5);
-    images.forEach((elem) => {
-      // do stuff with element
-      let href = doc.$(elem).attr('src');
-      if (href) {
-        const url = doc.resolve(href);
-        // crawl more
-        this.spider.queue(url, (doc) => this.handleRequest(doc));
-      }
-    });
+    // Scrape images and JS
+    let images = doc.$('script, img').toArray()
+      .sort(() => Math.random() - 0.5)
+      .forEach((elem) => {
+        // do stuff with element
+        let uri = doc.$(elem).attr('src');
+        if (uri) {
+          this.queue(uri.replace(/(\?.+)$/, ''), doc);
+        }
+      });
+  }
+
+  queue(uri, doc) {
+    const url = doc.resolve(uri);
+    if (url.match(/^https?:\/\//) && url.match(this.TARGET_HOST)) {
+      this.spider.queue(url, (doc) => this.handleRequest(doc));
+    }
   }
 
   handleRequest(doc) {
@@ -185,10 +182,10 @@ class SSG {
     this.writeFile(filePath, doc);
     const contentType = doc.res.headers['content-type'];
     const contentTypeShortMatch = contentType.match(/(.+);/);
-    const contentTypeShort = contentTypeShortMatch ? contentTypeShortMatch[1]: contentType;
-    this.typeCounts[contentTypeShort] = this.typeCounts.hasOwnProperty(contentTypeShort) ? this.typeCounts[contentTypeShort]+1 : 1;
+    const contentTypeShort = contentTypeShortMatch ? contentTypeShortMatch[1] : contentType;
+    this.typeCounts[contentTypeShort] = this.typeCounts.hasOwnProperty(contentTypeShort) ? this.typeCounts[contentTypeShort] + 1 : 1;
     // Scrape if the document is an HTML
-    if (contentType.match('text/html')){
+    if (contentType.match('text/html')) {
       this.scrapeContent(doc);
     }
   }
