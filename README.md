@@ -18,11 +18,11 @@ Light weight script to crawl a website to download the static content.
 ## Installation
 
 1. Clone the repo
-2. npm install
+2. run `npm install`
 
 ## Usage
 
-1. node index <options>
+1. `node index <options>`
 
 ### Options
 
