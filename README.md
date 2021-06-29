@@ -22,7 +22,7 @@ Light weight script to crawl a website to download the static content.
 
 ## Usage
 
-1. `node index <options>`
+`node index <options>`
 
 ### Options
 
